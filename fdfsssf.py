@@ -139,8 +139,8 @@ if __name__ == "__main__":
 
     print (count1)
     print (count2)
-    #diplomacy = trimDataSet(diplomacy)
-
+    #diplomacy = trimDataSet(diplomacy
+)
     #double check all attacks were removed
     #for entry in diplomacy:
     #    for season in entry['seasons']:
