@@ -4,11 +4,18 @@ from __future__ import print_function
 
 import os
 import urllib
-
+import json
+from io import open
+    
 import numpy as np
 import tensorflow as tf
 import sklearn.model_selection as sk
 import pandas as pd
+#import autosklearn.classification
+import sklearn.model_selection
+import sklearn.datasets
+import sklearn.metrics
+from sklearn import svm
 
 #throw out data that is during the betrayal and 1 friendship before it (if it was a betrayal)
 def trimDataSet(diplomacy):
@@ -18,20 +25,139 @@ def trimDataSet(diplomacy):
             del entry['seasons'][len(entry['seasons']) -1]
     return diplomacy
 
-
-if __name__ == "__main__":
+# preprocess data, select features, and prepare into tensors for use in training with TF
+def prepare_data():
     #load diplomacy data from json
-    import json
-    from io import open
     with open ("diplomacy_data.json", "r") as f:
         diplomacy = json.load(f)
+
+    outputData = []
+    features = []
+    diplomacy = trimDataSet(diplomacy)
+
+    sentimentPositive = 0
+    numSentences = 0
+    negativeSentiment = 0
+    numWords = 0
+    DMFuture = 0
+    DMContingency = 0
+    DMExpansion = 0
+    DMComparison = 0
+
+    for entry in diplomacy:
+        for season in entry['seasons']:
+            for betrayerMessage in season['messages']['betrayer']:
+                numSentences = numSentences + betrayerMessage['n_sentences']
+                numWords = numWords + betrayerMessage['n_words']
+                negativeSentiment = negativeSentiment + betrayerMessage['sentiment']['negative']
+                sentimentPositive = sentimentPositive + betrayerMessage['sentiment']['positive']
+
+                dict = betrayerMessage['lexicon_words']
+                if 'disc_temporal_future' in dict:
+                    DMFuture = DMFuture + (len(dict['disc_temporal_future']))
+                if 'disc_expansion' in dict:                
+                    DMExpansion = DMExpansion + (len(dict['disc_expansion']))
+                if 'disc_comparison' in dict:
+                    DMComparison = DMComparison + (len(dict['disc_comparison']))
+                if 'disc_contingency' in dict:
+                    DMContingency = DMContingency + (len(dict['disc_contingency']))
+
+            #if the message is empty from betrayer to victim, don't add it to the dataset
+            if (numSentences != 0): 
+                features.append(sentimentPositive / numSentences)
+                features.append(negativeSentiment / numSentences)
+                features.append(DMFuture / numSentences)
+                features.append(DMExpansion / numSentences)
+                features.append(DMComparison / numSentences)
+                features.append(DMContingency / numSentences)
+                features.append(numSentences)
+                features.append(numWords)
+
+                # output data is true or false (make it 1 or 0)
+                if (entry ['betrayal'] == True):
+                    outputData.append(1)
+                else:
+                    outputData.append(0)
+            
+            sentimentPositive = 0
+            numSentences = 0
+            negativeSentiment = 0
+            numWords = 0
+            DMFuture = 0
+            DMContingency = 0
+            DMExpansion = 0
+            DMComparison = 0
+
+  #break data into train and testing sets, with 80% for training data and 20% for test set, random state is deterministic for debugging
+    inputData = np.reshape(features, (1687,8))
+    X_train, X_test, y_train, y_test = sk.train_test_split(inputData, outputData, test_size=0.20, random_state=21)
+    return (X_train, X_test, y_train, y_test)
+
+def input_fn():
+    (X_train, X_test, y_train, y_test) = prepare_data()
+    feature_vector = tf.constant(X_train)
+    labels = tf.constant(y_train)
+
+    return feature_vector, labels
+
+def input_fn_test():
+    (X_train, X_test, y_train, y_test) = prepare_data()
+    feature_vector = tf.constant(X_test)
+    labels = tf.constant(y_test)
+    return test_feature_vector, test_labels
+
+
+
+
+if __name__ == "__main__":
+
+    # Model 1: Support Vector Machine using the parameters given in the paper
+    (X_train, X_test, y_train, y_test) = prepare_data()
+    clf = svm.SVC()
+    clf.fit(X_train, y_train) 
+    y_hat = clf.predict(X_test)
+    print("Accuracy score", sklearn.metrics.accuracy_score(y_test, y_hat))
+
+    #Using random_state = 21, accuracy of 57%
+    
+
+    #Model 2 
+
+
+
+    # turn on tensorflow monitor to display info as training progrress (validate gradient etc.)
+    #tf.logging.set_verbosity(tf.logging.INFO)
+   
+
 
    
 
 
+    # Model 1: Logistic Regression Model using parameters given in the paper
+    #(feature_vector, labels) = input_fn()
+    #logistic_regressor = tf.contrib.learn.LinearClassifier(feature_columns = feature_vector, 
+    #    optimizer=tf.train.FtrlOptimizer(
+    #learning_rate=0.1,
+    #l1_regularization_strength=1.0,
+    #l2_regularization_strength=1.0))
 
-# output data is true or false (make it 1 or 0)
+    #logistic_regressor.fit(input_fn=input_fn, steps=1000)
 
+
+    #evaluate model
+    #results = m.evaluate(input_fn=eval_input_fn, steps=1)
+    #for key in sorted(results):
+    #    print("%s: %s" % (key, results[key]))
+
+
+    #Model 3: Automatic fit using autosklearn
+    #automl = autosklearn.classification.AutoSklearnClassifier()
+    #automl.fit(X_train, y_train)
+    #y_hat = automl.predict(X_test)
+    #print("Accuracy score", sklearn.metrics.accuracy_score(y_test, y_hat))
+
+
+### TODODODO, cslling prepare_data twice. Only do this once!!!!
 
 #GOAL 1: Given the current seasons, predict support or betray
 # baseline test multivariate logistic regression
@@ -62,94 +188,11 @@ if __name__ == "__main__":
 
 
 
-# preprocess data, select features, and prepare into tensors for use in training with TF
-def input_fn(df):
-     outputData = []
-    features = []
-    diplomacy = trimDataSet(diplomacy)
 
-    sentimentPositive = 0
-    numSentences = 0
-    negativeSentiment = 0
-    numWords = 0
-    DMFuture = 0
-    DMContingency = 0
-    DMExpansion = 0
-    DMComparison = 0
 
-    for entry in diplomacy:
-        if (entry ['betrayal'] == True):
-            for x in range (len(entry['seasons'])):
-                outputData.append(1)
-        else:
-            for x in range (len(entry['seasons'])):
-                outputData.append(0)
-        for season in entry['seasons']:
-            for betrayerMessage in season['messages']['betrayer']:
-                numSentences = numSentences + betrayerMessage['n_sentences']
-                numWords = numWords + betrayerMessage['n_words']
-                negativeSentiment = negativeSentiment + betrayerMessage['sentiment']['negative']
-                sentimentPositive = sentimentPositive + betrayerMessage['sentiment']['positive']
 
-                dict = betrayerMessage['lexicon_words']
-                if 'disc_temporal_future' in dict:
-                    DMFuture = DMFuture + (len(dict['disc_temporal_future']))
-                if 'disc_expansion' in dict:                
-                    DMExpansion = DMExpansion + (len(dict['disc_expansion']))
-                if 'disc_comparison' in dict:
-                    DMComparison = DMComparison + (len(dict['disc_comparison']))
-                if 'disc_contingency' in dict:
-                    DMContingency = DMContingency + (len(dict['disc_contingency']))
-
-            features.append(numSentences)
-            features.append(numWords)
-            
-            if (numSentences != 0): 
-                features.append(sentimentPositive / numSentences)
-                features.append(negativeSentiment / numSentences)
-                features.append(DMFuture / numSentences)
-                features.append(DMExpansion / numSentences)
-                features.append(DMComparison / numSentences)
-                features.append(DMContingency / numSentences)
-
-            else:
-                features.append(0)
-                features.append(0)
-                features.append(0)
-                features.append(0)
-                features.append(0)
-                features.append(0)
-            sentimentPositive = 0
-            numSentences = 0
-            negativeSentiment = 0
-            numWords = 0
-            DMFuture = 0
-            DMContingency = 0
-            DMExpansion = 0
-            DMComparison = 0
-
-            
-
-    
-  #break data into train and testing sets, with 80% for test set
-    inputData =  np.asarray(features)
-    print(inputData)
-    print(len(features))
-    print(len(outputData))
-    inputData = np.reshape(inputData, (2794,8))
-  
-    X_train, X_test, y_train, y_test = sk.train_test_split(inputData, outputData, test_size=0.20, random_state=18)
-    for x in range(500):
-        print(X_train[x])
-        print(y_train[x])
   # break data into train and test set (maybe use k folds like they did) 
   #TODO cross validation
-
-     #create a dictionary
-     inputColumns = {k : tf.constant(df[k]) 
-                         for k in range (8)}
-
-
 
 
 # def build_estimator(model_dir, model_type):
